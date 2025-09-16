@@ -1,0 +1,361 @@
+{
+  "info": {
+    "_postman_id": "12345678-1234-1234-1234-123456789012",
+    "name": "AI Debugging Coach API",
+    "description": "Complete API collection for AI Debugging Coach with FastAPI backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Health Check",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has message\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData.message).to.exist;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            ""
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "2. Test API Connection",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/test-api",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "test-api"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "3. Debug Help - Python",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response contains debugging help\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData.response).to.exist;",
+              "    pm.expect(jsonData.model_used).to.exist;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language\": \"python\",\n  \"level\": \"beginner\",\n  \"error\": \"IndexError: list index out of range\\nmy_list = [1, 2, 3]\\nprint(my_list[5])\",\n  \"context\": \"Trying to access list elements\",\n  \"user_id\": \"{{testUserId}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/debug",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "debug"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "4. Debug Help - JavaScript",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language\": \"javascript\",\n  \"level\": \"intermediate\",\n  \"error\": \"TypeError: Cannot read property 'length' of undefined\\nlet arr = undefined;\\nconsole.log(arr.length);\",\n  \"context\": \"Working with arrays in web application\",\n  \"user_id\": \"{{testUserId}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/debug",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "debug"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "5. Generate Practice Questions",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Session ID is present\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData.session_id).to.exist;",
+              "    pm.environment.set(\"sessionId\", jsonData.session_id);",
+              "});",
+              "",
+              "pm.test(\"Questions are generated\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData.questions).to.be.an('array');",
+              "    pm.expect(jsonData.questions.length).to.be.above(0);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language\": \"python\",\n  \"level\": \"beginner\",\n  \"mode\": \"quiz\",\n  \"user_id\": \"{{testUserId}}\",\n  \"num_questions\": 5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/practice/generate",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "practice",
+            "generate"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "6. Submit Practice Answer",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Use the session ID from the previous request",
+              "if (!pm.environment.get(\"sessionId\")) {",
+              "    console.log(\"Warning: No session ID found. Run 'Generate Practice Questions' first.\");",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"user_id\": \"{{testUserId}}\",\n  \"session_id\": \"{{sessionId}}\",\n  \"question_id\": 1,\n  \"user_answer\": \"B\",\n  \"time_taken_seconds\": 45\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/practice/answer",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "practice",
+            "answer"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "7. Get User Session",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/user/{{testUserId}}/session",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "user",
+            "{{testUserId}}",
+            "session"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "8. Get User History",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/user/{{testUserId}}/history?limit=10",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "user",
+            "{{testUserId}}",
+            "history"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "9. Get Leaderboard",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/leaderboard?limit=10",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "leaderboard"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10. Run Test Cases",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/test-cases",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "test-cases"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "11. Reset User Data",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/user/{{testUserId}}/reset",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "user",
+            "{{testUserId}}",
+            "reset"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "testUserId",
+      "value": "user_postman_test",
+      "type": "string"
+    }
+  ]
+}
