@@ -1,0 +1,23 @@
+# Environment
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+
+# IDE
+.vscode/
+.idea/

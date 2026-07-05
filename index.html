@@ -606,7 +606,7 @@
         const API_BASE = 'http://localhost:8000';
         let currentSession = null;
         let currentQuestions = [];
-        let sessionStats = { queries: 0, score: 0, correct: 0, total: 0 };
+        let sessionStats = { queries: 0, score: 0, correct: 0, total: 0, streak: 0 };
 
         // Initialize background animation
         function initBackgroundAnimation() {
@@ -645,10 +645,11 @@
                 
                 const response = await fetch(`${API_BASE}${endpoint}`, config);
                 const result = await response.json();
-                
+
                 const responseTime = Date.now() - startTime;
                 document.getElementById('responseTime').textContent = responseTime + 'ms';
-                
+
+                if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
                 return result;
             } catch (error) {
                 document.getElementById('apiStatusText').textContent = 'Error';
@@ -659,20 +660,6 @@
 
         function getUserId() {
             return document.getElementById('userId').value || 'debug_user_001';
-        }
-// ✅ Fixed code
-        function handleAnswer(event) {
-            if (!event || !event.target) {
-                console.error('Event or target is undefined');
-                return;
-            }
-            const answer = event.target.value;
-            // ✅ Fixed
-            button.addEventListener('click', handleAnswer);
-
-            function handleAnswer(event) {
-                const answer = event.target.value;
-            }
         }
         function showResponse(elementId, data, isError = false) {
             const element = document.getElementById(elementId);
@@ -754,15 +741,6 @@
         }
 
 
-function selectAnswer(questionId, answer) {
-    document.querySelectorAll(`[data-question="${questionId}"]`).forEach(option => {
-        option.classList.remove('selected');
-    });
-    event.target.classList.add('selected'); // ❌ event is undefined here
-    window.selectedAnswers = window.selectedAnswers || {};
-    window.selectedAnswers[questionId] = answer;
-}
-
 function selectAnswer(event, questionId, answer) {
     if (!event || !event.target) {
         console.error('Event or target is undefined');
@@ -775,15 +753,6 @@ function selectAnswer(event, questionId, answer) {
     event.target.classList.add('selected');
     window.selectedAnswers = window.selectedAnswers || {};
     window.selectedAnswers[questionId] = answer;
-}
-
-// ❌ PROBLEM: Missing event parameter in submitAnswer
-async function submitAnswer(questionId) {
-    // ... existing code ...
-    
-    // Disable question
-    event.target.disabled = true; // ❌ event is undefined here
-    event.target.textContent = 'Submitted';
 }
 
 async function submitAnswer(event, questionId) {
@@ -805,12 +774,16 @@ async function submitAnswer(event, questionId) {
         
         const isCorrect = response.correct;
         sessionStats.total++;
-        if (isCorrect) sessionStats.correct++;
+        if (isCorrect) {
+            sessionStats.correct++;
+            sessionStats.streak++;
+        } else {
+            sessionStats.streak = 0;
+        }
         sessionStats.score += response.points_earned;
-        
+
         updateStats();
-        
-        const resultDiv = document.getElementById(`result-${questionId}`);
+
         showResponse(`result-${questionId}`, {
             result: isCorrect ? 'CORRECT' : 'INCORRECT',
             points: response.points_earned,
@@ -828,30 +801,38 @@ async function submitAnswer(event, questionId) {
     }
 }
 
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
 function displayQuestions(questions) {
     const container = document.getElementById('questionsContainer');
     container.innerHTML = '';
-    
+
     questions.forEach(question => {
         const questionDiv = document.createElement('div');
         questionDiv.className = 'question-container';
-        
+
+        const letter = (opt) => opt.trim().charAt(0).toUpperCase();
+
         questionDiv.innerHTML = `
             <h3 style="color: #00ffff; margin-bottom: 15px;">Question ${question.id}</h3>
-            <p style="margin-bottom: 15px;">${question.question}</p>
-            ${question.code ? `<div class="code-block">${question.code}</div>` : ''}
+            <p style="margin-bottom: 15px;">${escapeHtml(question.question)}</p>
+            ${question.code ? `<div class="code-block">${escapeHtml(question.code)}</div>` : ''}
             <div class="option-grid">
                 ${question.options.map(option => `
-                    <div class="option" onclick="selectAnswer(event, ${question.id}, '${option.charAt(0)}')" 
-                         data-question="${question.id}" data-answer="${option.charAt(0)}">
-                        ${option}
+                    <div class="option" onclick="selectAnswer(event, ${question.id}, '${letter(option)}')"
+                         data-question="${question.id}" data-answer="${letter(option)}">
+                        ${escapeHtml(option)}
                     </div>
                 `).join('')}
             </div>
             <button onclick="submitAnswer(event, ${question.id})" style="margin-top: 15px;">Submit Answer</button>
             <div class="response-area" id="result-${question.id}"></div>
         `;
-        
+
         container.appendChild(questionDiv);
     });
 }
@@ -860,7 +841,7 @@ function displayQuestions(questions) {
             document.getElementById('totalScore').textContent = sessionStats.score;
             const accuracy = sessionStats.total > 0 ? Math.round((sessionStats.correct / sessionStats.total) * 100) : 0;
             document.getElementById('accuracy').textContent = accuracy + '%';
-            document.getElementById('streak').textContent = sessionStats.correct;
+            document.getElementById('streak').textContent = sessionStats.streak;
         }
 
         function addToHistory(action, language) {
@@ -871,7 +852,7 @@ function displayQuestions(questions) {
             entry.style.padding = '5px 0';
             entry.style.borderBottom = '1px solid rgba(0, 255, 255, 0.1)';
             
-            if (history.children.length === 0) {
+            if (history.querySelector('p')) {
                 history.innerHTML = '';
             }
             
@@ -899,13 +880,19 @@ print(my_list[5])
             generatePractice();
         }
 
-        function viewLeaderboard() {
-            alert('Leaderboard feature coming soon!');
+        async function viewLeaderboard() {
+            try {
+                const response = await apiRequest('/leaderboard?limit=10');
+                switchTab({ currentTarget: document.querySelector('.tab:nth-child(3)') }, 'results');
+                showResponse('resultsResponse', response);
+            } catch (error) {
+                showResponse('resultsResponse', { error: error.message }, true);
+            }
         }
 
         async function loadResults() {
             try {
-                const response = await apiRequest(`/results?user_id=${getUserId()}`);
+                const response = await apiRequest(`/user/${getUserId()}/history?limit=20`);
                 showResponse('resultsResponse', response);
             } catch (error) {
                 showResponse('resultsResponse', { error: error.message }, true);
@@ -916,7 +903,7 @@ print(my_list[5])
             if (confirm('Are you sure you want to reset the system? This will clear all session data.')) {
                 currentSession = null;
                 currentQuestions = [];
-                sessionStats = { queries: 0, score: 0, correct: 0, total: 0 };
+                sessionStats = { queries: 0, score: 0, correct: 0, total: 0, streak: 0 };
                 updateStats();
                 document.getElementById('sessionHistory').innerHTML = '<p style="color: #666; text-align: center;">No sessions yet</p>';
                 document.getElementById('debugResponse').classList.remove('show');

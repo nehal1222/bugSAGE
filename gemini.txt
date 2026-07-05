@@ -1,7 +1,8 @@
-GEMINI_API_KEY=AIzaSyCOaVQfPQ-f0qbfHgZPj0oaAcTKLhQwoPk
-curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent" \
+# DO NOT commit real API keys. Store GEMINI_API_KEY in .env only.
+# Example curl test — replace YOUR_KEY with the value from your .env file:
+curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent" \
   -H 'Content-Type: application/json' \
-  -H 'X-goog-api-key: GEMINI_API_KEY' \
+  -H 'X-goog-api-key: YOUR_KEY' \
   -X POST \
   -d '{
     "contents": [

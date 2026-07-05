@@ -6,7 +6,7 @@ import httpx
 import logging
 import json
 import random
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -15,8 +15,9 @@ import uuid
 # ---------------------------------------------------------------------
 # Env + Logging
 # ---------------------------------------------------------------------
-ENV_PATH = Path(__file__).parent / ".env"
-load_dotenv(dotenv_path=ENV_PATH)
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,12 +28,12 @@ logger = logging.getLogger("debug_coach")
 # ---------------------------------------------------------------------
 # FastAPI + CORS
 # ---------------------------------------------------------------------
-app = FastAPI(title="AI Debugging Coach", version="1.2.0")
+app = FastAPI(title="AI Debugging Coach", version="1.3.0")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -82,8 +83,6 @@ class DebugRequest(BaseModel):
             raise ValueError('Error description too long (max 10000 characters)')
         return v.strip()
 
-    # Alternative: Remove all validators for testing
-    # Just comment out all @field_validator decorators and methods
 
 class PracticeRequest(BaseModel):
     language: str
@@ -91,7 +90,6 @@ class PracticeRequest(BaseModel):
     mode: str
     user_id: str
     num_questions: Optional[int] = 10
-    suggestion: Optional[str] = None
 
     @field_validator('mode')
     @classmethod
@@ -112,21 +110,20 @@ class AnswerRequest(BaseModel):
 # Gemini API Configuration
 # ---------------------------------------------------------------------
 GEMINI_MODELS = [
-    "gemini-2.0-flash-exp",
     "gemini-1.5-flash",
     "gemini-1.5-pro",
+    "gemini-2.0-flash-exp",
     "gemini-pro"
 ]
 
 async def call_gemini_api(prompt: str, temperature=0.7, max_tokens=2000) -> Dict[str, Any]:
     """Call Gemini API with fallback models"""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
 
     headers = {
         "Content-Type": "application/json",
-        "x-goog-api-key": api_key
+        "x-goog-api-key": GEMINI_API_KEY
     }
 
     payload = {
@@ -154,6 +151,11 @@ async def call_gemini_api(prompt: str, temperature=0.7, max_tokens=2000) -> Dict
                 if "candidates" in data and data["candidates"]:
                     return {"model": model, "data": data}
                     
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (401, 403):
+                    raise HTTPException(status_code=500, detail="Invalid Gemini API key")
+                logger.warning(f"Model {model} HTTP {e.response.status_code}: {e}")
+                continue
             except Exception as e:
                 logger.warning(f"Model {model} failed: {e}")
                 continue
@@ -469,7 +471,7 @@ Please provide debugging assistance in this format:
 async def root():
     return {
         "message": "AI Debugging Coach API",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "status": "operational",
         "endpoints": {
             "debug": "POST /debug - Get debugging help",
@@ -484,39 +486,21 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "1.2.0",
+        "version": "1.3.0",
         "active_users": len(user_sessions),
         "active_sessions": len(practice_sessions)
     }
 
-@app.get("/test-api")
-async def test_api():
-    """Test Gemini API connection"""
-    try:
-        response = await call_gemini_api("Reply with: API connection successful!", temperature=0.1, max_tokens=50)
-        text = extract_gemini_text(response)
-        return {
-            "success": True,
-            "model_used": response["model"],
-            "response": text,
-            "message": "Gemini API working correctly"
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
 @app.post("/debug")
 async def debug_endpoint(request: DebugRequest):
     """Debug assistance endpoint"""
     start_time = datetime.now()
-    
-    # Add debug logging
-    logger.info(f"Debug request received: {request.model_dump()}")
-    
+    logger.info(f"Debug request: user={request.user_id} lang={request.language} level={request.level}")
+
     try:
-        # Initialize user session
         if request.user_id:
             init_user_session(request.user_id)
             session = user_sessions[request.user_id]
@@ -526,20 +510,18 @@ async def debug_endpoint(request: DebugRequest):
                 session["favorite_language"] = request.language
                 session["skill_level"] = request.level
 
-        # Create prompt and call Gemini
         prompt = create_debug_prompt(request.language, request.level, request.error, request.context)
         response = await call_gemini_api(prompt)
         answer = extract_gemini_text(response)
-        
+
         if not answer or len(answer.strip()) < 50:
             raise HTTPException(status_code=502, detail="AI response too short or empty")
 
         processing_time = (datetime.now() - start_time).total_seconds()
 
-        # Log to history
         if request.user_id:
             add_to_history(
-                request.user_id, "debug", request.language, 
+                request.user_id, "debug", request.language,
                 request.level, request.error, processing_time
             )
 
@@ -556,24 +538,6 @@ async def debug_endpoint(request: DebugRequest):
         logger.error(f"Debug endpoint error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# Alternative: Add a raw request handler for debugging
-from fastapi import Request
-
-@app.post("/debug-raw")
-async def debug_raw(request: Request):
-    """Raw debug endpoint to see exact request data"""
-    try:
-        body = await request.body()
-        logger.info(f"Raw request body: {body}")
-        
-        json_data = await request.json()
-        logger.info(f"Parsed JSON: {json_data}")
-        
-        return {"received_data": json_data, "status": "ok"}
-    except Exception as e:
-        logger.error(f"Raw debug error: {e}")
-        return {"error": str(e)}
-    
 @app.post("/practice/generate")
 async def generate_practice_endpoint(request: PracticeRequest):
     """Generate practice questions"""
@@ -707,13 +671,13 @@ async def get_user_session(user_id: str):
     
     # Calculate statistics
     debug_queries = len([h for h in history if h["request_type"] == "debug"])
-    practice_sessions = len([h for h in history if h["request_type"] == "practice_complete"])
+    practice_session_count = len([h for h in history if h["request_type"] == "practice_complete"])
     total_score = leaderboard.get("total_score", 0)
-    
+
     stats = {
         "total_queries": session["total_queries"],
         "debug_queries": debug_queries,
-        "practice_sessions": practice_sessions,
+        "practice_sessions": practice_session_count,
         "total_practice_score": total_score,
         "favorite_language": session.get("favorite_language"),
         "skill_level": session.get("skill_level")
@@ -729,6 +693,7 @@ async def get_user_history(user_id: str, limit: int = 20):
     """Get user history"""
     init_user_session(user_id)
     
+    limit = min(max(1, limit), 100)
     history = user_history.get(user_id, [])
     recent_history = sorted(history, key=lambda x: x["timestamp"], reverse=True)[:limit]
     
@@ -740,6 +705,7 @@ async def get_user_history(user_id: str, limit: int = 20):
 @app.get("/leaderboard")
 async def get_leaderboard(limit: int = 10):
     """Get leaderboard"""
+    limit = min(max(1, limit), 100)
     sorted_users = sorted(
         leaderboard_data.values(),
         key=lambda x: x.get("total_score", 0),
