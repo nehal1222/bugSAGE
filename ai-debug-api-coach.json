@@ -1,7 +1,7 @@
 {
   "info": {
     "_postman_id": "12345678-1234-1234-1234-123456789012",
-    "name": "AI Debugging Coach API",
+    "name": "AI Debugging Tool API",
     "description": "Complete API collection for AI Debugging Coach with FastAPI backend",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
