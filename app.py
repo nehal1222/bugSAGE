@@ -67,12 +67,18 @@ _db = _DBShim()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global _http_client
-    await db_connect(str(DB_PATH))
+    try:
+        await db_connect(str(DB_PATH))
+        await init_db()
+        logger.info("Startup complete — database ready")
+    except Exception as exc:
+        logger.error("Database startup failed (app will still serve, DB ops will error): %s", exc)
     _http_client = httpx.AsyncClient(timeout=60.0)
-    await init_db()
-    logger.info("Startup complete — database and HTTP client ready")
     yield
-    await db_close()
+    try:
+        await db_close()
+    except Exception:
+        pass
     if _http_client:
         await _http_client.aclose()
 
