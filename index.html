@@ -2229,10 +2229,53 @@ print(my_list[5])`;
     }
 
     // ── Init ─────────────────────────────────────────────────────
+    // ── Draft persistence ─────────────────────────────────────────────────────
+    const DRAFT_FIELDS = [
+        { id: 'debugLanguage',   event: 'change' },
+        { id: 'debugLevel',      event: 'change' },
+        { id: 'debugContext',    event: 'input'  },
+        { id: 'errorInput',      event: 'input'  },
+        { id: 'practiceLanguage',event: 'change' },
+        { id: 'practiceLevel',   event: 'change' },
+        { id: 'practiceMode',    event: 'change' },
+        { id: 'questionCount',   event: 'input'  },
+        { id: 'ivLang',          event: 'change' },
+        { id: 'ivLevel',         event: 'change' },
+        { id: 'ivMode',          event: 'change' },
+        { id: 'ivCount',         event: 'input'  },
+        { id: 'githubUrlInput',  event: 'input'  },
+        { id: 'diffInput',       event: 'input'  },
+    ];
+
+    function saveDraft(id) {
+        const el = document.getElementById(id);
+        if (el) localStorage.setItem('bs_draft_' + id, el.value);
+    }
+
+    function restoreDrafts() {
+        DRAFT_FIELDS.forEach(({ id }) => {
+            const el  = document.getElementById(id);
+            const val = localStorage.getItem('bs_draft_' + id);
+            if (el && val !== null) {
+                el.value = val;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
+    }
+
+    function initDraftListeners() {
+        DRAFT_FIELDS.forEach(({ id, event }) => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener(event, () => saveDraft(id));
+        });
+    }
+
     window.onload = () => {
         checkAuth();
         checkHealth();
         setInterval(updateTokenBar, 30000);
+        restoreDrafts();
+        initDraftListeners();
     };
 </script>
 </body>

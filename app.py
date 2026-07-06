@@ -4,9 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from pydantic import BaseModel, field_validator
+import asyncio
 import os
 import httpx
-import aiosqlite
 import logging
 import json
 import random
@@ -23,6 +23,10 @@ from collections import defaultdict
 import re
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+from db import (
+    db_connect, db_close, init_db,
+    db_execute, db_commit, db_fetchrow, db_fetchall, db_fetchval,
+)
 # ---------------------------------------------------------------------
 # Env + Logging
 # ---------------------------------------------------------------------
@@ -43,23 +47,31 @@ DB_PATH  = DATA_DIR / "bugsage.db"
 # ---------------------------------------------------------------------
 # Shared resources + lifespan
 # ---------------------------------------------------------------------
-_db: Optional[aiosqlite.Connection] = None
 _http_client: Optional[httpx.AsyncClient] = None
+
+
+class _DBShim:
+    """Thin shim so existing _db.execute / _db.commit call sites need no changes."""
+
+    async def execute(self, sql: str, args: tuple = ()) -> None:
+        await db_execute(sql, *args)
+
+    async def commit(self) -> None:
+        await db_commit()
+
+
+_db = _DBShim()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global _db, _http_client
-    _db = await aiosqlite.connect(str(DB_PATH))
-    _db.row_factory = aiosqlite.Row
-    await _db.execute("PRAGMA journal_mode=WAL")
-    await _db.execute("PRAGMA foreign_keys=ON")
+    global _http_client
+    await db_connect(str(DB_PATH))
     _http_client = httpx.AsyncClient(timeout=60.0)
     await init_db()
-    logger.info("Startup complete — SQLite and HTTP client ready")
+    logger.info("Startup complete — database and HTTP client ready")
     yield
-    if _db:
-        await _db.close()
+    await db_close()
     if _http_client:
         await _http_client.aclose()
 
@@ -77,70 +89,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------
-# SQLite — Schema
-# ---------------------------------------------------------------------
-async def init_db():
-    await _db.executescript("""
-        CREATE TABLE IF NOT EXISTS auth (
-            user_id       TEXT PRIMARY KEY,
-            password_hash TEXT NOT NULL,
-            created_at    TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS tokens (
-            token      TEXT PRIMARY KEY,
-            user_id    TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS users (
-            user_id           TEXT PRIMARY KEY,
-            session_id        TEXT NOT NULL,
-            created_at        TEXT NOT NULL,
-            total_queries     INTEGER DEFAULT 0,
-            favorite_language TEXT,
-            skill_level       TEXT,
-            last_activity     TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS history (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id         TEXT NOT NULL,
-            timestamp       TEXT NOT NULL,
-            request_type    TEXT NOT NULL,
-            language        TEXT NOT NULL,
-            level           TEXT NOT NULL,
-            query           TEXT,
-            processing_time REAL,
-            score           INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS leaderboard (
-            user_id                     TEXT PRIMARY KEY,
-            total_score                 INTEGER DEFAULT 0,
-            practice_sessions_completed INTEGER DEFAULT 0,
-            last_activity               TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS practice_sessions (
-            session_id            TEXT PRIMARY KEY,
-            user_id               TEXT NOT NULL,
-            language              TEXT NOT NULL,
-            level                 TEXT NOT NULL,
-            mode                  TEXT NOT NULL,
-            questions             TEXT NOT NULL,
-            answers               TEXT DEFAULT '{}',
-            started_at            TEXT NOT NULL,
-            completed_at          TEXT,
-            total_score           INTEGER DEFAULT 0,
-            total_possible_points INTEGER DEFAULT 0
-        );
-    """)
-    await _db.commit()
-    # Migration: add token_type column if not present
-    try:
-        await _db.execute("ALTER TABLE tokens ADD COLUMN token_type TEXT NOT NULL DEFAULT 'access'")
-        await _db.commit()
-    except Exception:
-        pass
-    logger.info("Database tables ready")
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -152,19 +100,15 @@ def row_to_dict(row) -> Optional[Dict]:
 
 
 async def fetchrow(sql: str, *args):
-    async with _db.execute(sql, args) as cur:
-        return await cur.fetchone()
+    return await db_fetchrow(sql, *args)
 
 
 async def fetchall(sql: str, *args):
-    async with _db.execute(sql, args) as cur:
-        return await cur.fetchall()
+    return await db_fetchall(sql, *args)
 
 
 async def fetchval(sql: str, *args):
-    async with _db.execute(sql, args) as cur:
-        row = await cur.fetchone()
-        return row[0] if row else None
+    return await db_fetchval(sql, *args)
 
 # ---------------------------------------------------------------------
 # Password hashing — PBKDF2-HMAC-SHA256 (no extra packages needed)
@@ -1460,13 +1404,20 @@ async def _call_gemini(prompt: str, model: str, temperature: float = 0.4,
     model_id = model if model in GEMINI_MODELS else GEMINI_MODELS[0]
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{model_id}:generateContent?key={GEMINI_API_KEY}")
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, json={
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
-        })
-    resp.raise_for_status()
-    return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    for attempt in range(4):
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
+            })
+        if resp.status_code == 429:
+            wait = int(resp.headers.get("Retry-After", 2 ** (attempt + 1)))
+            logger.warning("Gemini rate limit hit, retrying in %ss (attempt %s)", wait, attempt + 1)
+            await asyncio.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    raise HTTPException(status_code=429, detail="Gemini rate limit reached. Wait a moment and try again.")
 
 
 @app.post("/interview/questions")

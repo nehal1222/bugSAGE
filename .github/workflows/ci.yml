@@ -40,4 +40,5 @@ jobs:
           GEMINI_API_KEY: dummy
           GOOGLE_CLIENT_ID: dummy
           DATA_DIR: /tmp
+          # DATABASE_URL intentionally unset → SQLite mode, asyncpg not imported
         run: python -c "import app; print('app.py imports OK')"
