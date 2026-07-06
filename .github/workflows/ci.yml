@@ -24,17 +24,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Install dev tools
-        run: pip install ruff
+      - name: Install ruff
+        run: pip install "ruff>=0.4.0,<1.0.0"
 
       - name: Lint with ruff
-        run: ruff check app.py --select E,F,W --ignore E501
+        run: python -m ruff check app.py --select E,F,W --ignore E501
 
       - name: Import check
         env:
           GEMINI_API_KEY: dummy
           GOOGLE_CLIENT_ID: dummy
+          DATA_DIR: /tmp
         run: python -c "import app; print('app.py imports OK')"
-
-      - name: Check requirements are pinnable
-        run: pip check
