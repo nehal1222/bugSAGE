@@ -196,7 +196,17 @@ async def init_db() -> None:
 # ── write operations ──────────────────────────────────────────────────────────
 
 
+def _require_db():
+    if IS_POSTGRES:
+        if _pool is None:
+            raise RuntimeError("PostgreSQL pool not initialized — check DATABASE_URL and startup logs")
+    else:
+        if _conn is None:
+            raise RuntimeError("SQLite connection not initialized — check DATA_DIR and startup logs")
+
+
 async def db_execute(sql: str, *args: Any) -> None:
+    _require_db()
     if IS_POSTGRES:
         async with _pool.acquire() as conn:
             await conn.execute(_to_pg(sql), *args)
@@ -213,6 +223,7 @@ async def db_commit() -> None:
 
 
 async def db_fetchrow(sql: str, *args: Any) -> Optional[Dict[str, Any]]:
+    _require_db()
     if IS_POSTGRES:
         async with _pool.acquire() as conn:
             row = await conn.fetchrow(_to_pg(sql), *args)
@@ -224,6 +235,7 @@ async def db_fetchrow(sql: str, *args: Any) -> Optional[Dict[str, Any]]:
 
 
 async def db_fetchall(sql: str, *args: Any) -> List[Dict[str, Any]]:
+    _require_db()
     if IS_POSTGRES:
         async with _pool.acquire() as conn:
             rows = await conn.fetch(_to_pg(sql), *args)
@@ -235,6 +247,7 @@ async def db_fetchall(sql: str, *args: Any) -> List[Dict[str, Any]]:
 
 
 async def db_fetchval(sql: str, *args: Any) -> Any:
+    _require_db()
     if IS_POSTGRES:
         async with _pool.acquire() as conn:
             return await conn.fetchval(_to_pg(sql), *args)

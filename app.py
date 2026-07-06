@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request, Depends, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from contextlib import asynccontextmanager
 from pydantic import BaseModel, field_validator
 import asyncio
@@ -95,6 +95,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception):
+    logger.error("Unhandled %s: %s", type(exc).__name__, exc, exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
+@app.get("/health")
+async def health():
+    from db import _pool, _conn, IS_POSTGRES
+    db_ok = (_pool is not None) if IS_POSTGRES else (_conn is not None)
+    return {
+        "status": "ok",
+        "db_backend": "postgres" if IS_POSTGRES else "sqlite",
+        "db_connected": db_ok,
+        "gemini_key_set": bool(GEMINI_API_KEY),
+        "google_client_id_set": bool(GOOGLE_CLIENT_ID),
+        "data_dir": str(DATA_DIR),
+    }
 
 
 # ---------------------------------------------------------------------
