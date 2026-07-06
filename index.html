@@ -437,6 +437,20 @@
         .diff-stat-rem { color: var(--red);   font-family: 'SF Mono', monospace; }
         .diff-stat-files{ color: var(--text-dim); }
         .verdict-approve { color: var(--green); font-weight: 700; }
+        /* Engineering Tools */
+        .tool-chip {
+            padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border);
+            background: var(--surface2); color: var(--text-dim); font-size: 0.8rem;
+            cursor: pointer; transition: all 0.15s; white-space: nowrap;
+        }
+        .tool-chip:hover { border-color: var(--border-accent); color: var(--text); }
+        .tool-chip.active { background: var(--cyan-dim); color: var(--cyan); border-color: var(--cyan); font-weight: 600; }
+        .tool-panel { display: none; }
+        .tool-panel.active { display: block; }
+        .tool-desc { font-size: 0.82rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.5; }
+        .tool-result { margin-top: 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+        .tool-result pre { background: var(--surface); border-radius: 6px; padding: 10px; font-size: 0.78rem; overflow-x: auto; white-space: pre-wrap; }
+        .tool-timer { font-size: 0.72rem; color: var(--text-dim); margin-top: 8px; text-align: right; }
         .verdict-warn    { color: #f59e0b;      font-weight: 700; }
         .verdict-reject  { color: var(--red);   font-weight: 700; }
 
@@ -747,6 +761,7 @@
             <button class="tab" data-tab="review" onclick="switchTab(event)">Review</button>
             <button class="tab" data-tab="results" onclick="switchTab(event)">Results</button>
             <button class="tab" data-tab="dashboard" onclick="switchTab(event);loadDashboard()">Dashboard</button>
+            <button class="tab" data-tab="tools" onclick="switchTab(event)">⚙ Tools</button>
         </div>
 
         <!-- Debug Tab -->
@@ -1048,6 +1063,189 @@
 
             <div id="dashEmpty" style="color:var(--text-dim);font-size:0.85rem;padding:30px 0;text-align:center;display:none;">
                 No sessions yet — complete a practice set to see your dashboard.
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════
+             Engineering Tools Tab
+        ══════════════════════════════════════════════════════════════ -->
+        <div id="tools" class="tab-content">
+            <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px;">
+                <button class="tool-chip active" data-tool="testgen"    onclick="selectTool('testgen')">🧪 Test Generator</button>
+                <button class="tool-chip"         data-tool="secscan"   onclick="selectTool('secscan')">🔒 Security Scanner</button>
+                <button class="tool-chip"         data-tool="loganalyze"onclick="selectTool('loganalyze')">📋 Log Analyzer</button>
+                <button class="tool-chip"         data-tool="rca"       onclick="selectTool('rca')">🔍 Root Cause Analysis</button>
+                <button class="tool-chip"         data-tool="prrisk"    onclick="selectTool('prrisk')">⚠ PR Risk Score</button>
+                <button class="tool-chip"         data-tool="legacy"    onclick="selectTool('legacy')">📜 Explain Legacy Code</button>
+                <button class="tool-chip"         data-tool="regression"onclick="selectTool('regression')">🔄 Regression Detector</button>
+                <button class="tool-chip"         data-tool="arch"      onclick="selectTool('arch')">🏗 Architecture Review</button>
+                <button class="tool-chip"         data-tool="sprint"    onclick="selectTool('sprint')">📊 Sprint Assistant</button>
+                <button class="tool-chip"         data-tool="incident"  onclick="selectTool('incident')">🚨 Incident Investigator</button>
+            </div>
+
+            <!-- Test Generator -->
+            <div class="tool-panel active" id="tool-testgen">
+                <div class="tool-desc">Upload a code file or paste code — AI generates complete unit tests with edge cases.</div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                    <select id="tgLang" style="flex:1;min-width:120px;">
+                        <option value="python">Python</option><option value="javascript">JavaScript</option>
+                        <option value="typescript">TypeScript</option><option value="java">Java</option>
+                        <option value="go">Go</option><option value="rust">Rust</option>
+                    </select>
+                    <select id="tgFramework" style="flex:1;min-width:120px;">
+                        <option value="auto">Auto-detect framework</option>
+                        <option value="pytest">pytest</option><option value="unittest">unittest</option>
+                        <option value="jest">jest</option><option value="JUnit 5">JUnit 5</option>
+                    </select>
+                </div>
+                <textarea id="tgCode" rows="8" placeholder="Paste your code here, or upload a file below…" style="width:100%;margin-bottom:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-family:monospace;font-size:0.82rem;resize:vertical;"></textarea>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <input type="file" id="tgFile" accept=".py,.js,.ts,.java,.go,.rs,.cpp,.cs" style="flex:1;">
+                    <button class="btn btn-primary" onclick="runTestGen()">Generate Tests</button>
+                </div>
+                <div id="tgResult" class="tool-result" style="display:none;"></div>
+            </div>
+
+            <!-- Security Scanner -->
+            <div class="tool-panel" id="tool-secscan">
+                <div class="tool-desc">Deep security audit — SQL injection, XSS, hardcoded secrets, path traversal, and more.</div>
+                <select id="ssLang" style="margin-bottom:8px;width:180px;">
+                    <option value="auto">Auto-detect language</option>
+                    <option value="python">Python</option><option value="javascript">JavaScript</option>
+                    <option value="java">Java</option><option value="php">PHP</option><option value="go">Go</option>
+                </select>
+                <textarea id="ssCode" rows="10" placeholder="Paste code to scan…" style="width:100%;margin-bottom:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-family:monospace;font-size:0.82rem;resize:vertical;"></textarea>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <input type="file" id="ssFile" style="flex:1;">
+                    <button class="btn btn-primary" onclick="runSecScan()">Scan for Vulnerabilities</button>
+                </div>
+                <div id="ssResult" class="tool-result" style="display:none;"></div>
+            </div>
+
+            <!-- Log Analyzer -->
+            <div class="tool-panel" id="tool-loganalyze">
+                <div class="tool-desc">Upload any log file (server.log, nginx.log, docker.log) — AI detects anomalies, repeating failures, and root causes across thousands of lines.</div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+                    <input type="file" id="logFile" accept=".log,.txt,.out" style="flex:1;">
+                    <button class="btn btn-primary" onclick="runLogAnalyze()">Analyze Log</button>
+                </div>
+                <div id="logResult" class="tool-result" style="display:none;"></div>
+            </div>
+
+            <!-- Root Cause Analysis -->
+            <div class="tool-panel" id="tool-rca">
+                <div class="tool-desc">Paste your stack trace + any additional context — AI correlates everything and pinpoints the root cause with a fix timeline.</div>
+                <div class="form-label" style="margin-top:10px;">Stack Trace / Error * (required)</div>
+                <textarea id="rcaTrace" rows="6" placeholder="Paste stack trace or error message…" style="width:100%;margin-bottom:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-family:monospace;font-size:0.82rem;resize:vertical;"></textarea>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                    <div>
+                        <div class="form-label">Recent Logs (optional)</div>
+                        <textarea id="rcaLogs" rows="4" placeholder="Paste relevant log lines…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:monospace;font-size:0.78rem;resize:vertical;"></textarea>
+                    </div>
+                    <div>
+                        <div class="form-label">Recent Commits (optional)</div>
+                        <textarea id="rcaCommits" rows="4" placeholder="git log --oneline output…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:monospace;font-size:0.78rem;resize:vertical;"></textarea>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+                    <div>
+                        <div class="form-label">Environment / Config (optional)</div>
+                        <textarea id="rcaEnv" rows="3" placeholder="OS, versions, env vars…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:0.78rem;resize:vertical;"></textarea>
+                    </div>
+                    <div>
+                        <div class="form-label">Dependencies (optional)</div>
+                        <textarea id="rcaDeps" rows="3" placeholder="pip freeze / package.json…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:monospace;font-size:0.78rem;resize:vertical;"></textarea>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="runRCA()">Analyze Root Cause</button>
+                <div id="rcaResult" class="tool-result" style="display:none;"></div>
+            </div>
+
+            <!-- PR Risk Score -->
+            <div class="tool-panel" id="tool-prrisk">
+                <div class="tool-desc">Paste a git diff — AI scores your PR across Security, Performance, Breaking Changes, and Maintainability and gives a merge recommendation.</div>
+                <input id="prTitle" type="text" placeholder="PR Title (optional)" style="width:100%;margin-bottom:6px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px;font-size:0.85rem;">
+                <textarea id="prDesc" rows="2" placeholder="PR Description (optional)" style="width:100%;margin-bottom:6px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px;font-size:0.85rem;resize:vertical;"></textarea>
+                <textarea id="prDiff" rows="10" placeholder="Paste git diff output here…" style="width:100%;margin-bottom:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-family:monospace;font-size:0.82rem;resize:vertical;"></textarea>
+                <button class="btn btn-primary" onclick="runPRRisk()">Score PR Risk</button>
+                <div id="prResult" class="tool-result" style="display:none;"></div>
+            </div>
+
+            <!-- Explain Legacy Code -->
+            <div class="tool-panel" id="tool-legacy">
+                <div class="tool-desc">Upload up to 10 files from a legacy codebase — AI produces an architecture overview, data flow, component breakdown, and onboarding guide.</div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+                    <input type="file" id="legacyFiles" multiple accept=".py,.js,.ts,.java,.go,.rs,.cpp,.cs,.php,.rb" style="flex:1;">
+                    <button class="btn btn-primary" onclick="runLegacy()">Explain Codebase</button>
+                </div>
+                <div id="legacyResult" class="tool-result" style="display:none;"></div>
+            </div>
+
+            <!-- Regression Detector -->
+            <div class="tool-panel" id="tool-regression">
+                <div class="tool-desc">Paste a git diff — AI predicts which modules might break before you deploy, and generates a deployment checklist.</div>
+                <textarea id="regDiff" rows="10" placeholder="Paste git diff output here…" style="width:100%;margin-bottom:6px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-family:monospace;font-size:0.82rem;resize:vertical;"></textarea>
+                <textarea id="regTests" rows="4" placeholder="Paste existing test file contents (optional — helps AI assess coverage gaps)…" style="width:100%;margin-bottom:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-family:monospace;font-size:0.78rem;resize:vertical;"></textarea>
+                <button class="btn btn-primary" onclick="runRegression()">Detect Regressions</button>
+                <div id="regResult" class="tool-result" style="display:none;"></div>
+            </div>
+
+            <!-- Architecture Review -->
+            <div class="tool-panel" id="tool-arch">
+                <div class="tool-desc">Enter a public GitHub repo URL — AI maps the directory structure, identifies complexity hotspots, circular import risks, and gives architectural recommendations.</div>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <input id="archRepo" type="text" placeholder="https://github.com/owner/repo" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 12px;font-size:0.9rem;">
+                    <button class="btn btn-primary" onclick="runArch()">Review Architecture</button>
+                </div>
+                <div id="archResult" class="tool-result" style="display:none;"></div>
+            </div>
+
+            <!-- Sprint Assistant -->
+            <div class="tool-panel" id="tool-sprint">
+                <div class="tool-desc">Connect a public GitHub repo — AI summarises what was shipped, what's in progress, blockers, team activity, and recommends next sprint focus.</div>
+                <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                    <input id="sprintRepo" type="text" placeholder="https://github.com/owner/repo" style="flex:2;min-width:200px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 12px;font-size:0.9rem;">
+                    <select id="sprintDays" style="flex:0 0 130px;">
+                        <option value="7">Last 7 days</option>
+                        <option value="14">Last 14 days</option>
+                        <option value="30">Last 30 days</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="runSprint()">Generate Summary</button>
+                </div>
+                <div id="sprintResult" class="tool-result" style="display:none;"></div>
+            </div>
+
+            <!-- Incident Investigator -->
+            <div class="tool-panel" id="tool-incident">
+                <div class="tool-desc">🚨 <strong>AI Incident Investigator</strong> — paste logs, stack traces, metrics, and recent commits. AI correlates everything, identifies the root cause, and generates a Jira ticket + Slack update.</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+                    <div>
+                        <div class="form-label">Incident Description</div>
+                        <textarea id="incDesc" rows="3" placeholder="What went wrong? When? Impact?" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:0.82rem;resize:vertical;"></textarea>
+                    </div>
+                    <div>
+                        <div class="form-label">Stack Trace / Error</div>
+                        <textarea id="incTrace" rows="3" placeholder="Paste stack trace…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:monospace;font-size:0.78rem;resize:vertical;"></textarea>
+                    </div>
+                    <div>
+                        <div class="form-label">Logs</div>
+                        <textarea id="incLogs" rows="4" placeholder="Paste relevant log lines…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:monospace;font-size:0.78rem;resize:vertical;"></textarea>
+                    </div>
+                    <div>
+                        <div class="form-label">Metrics / Alerts</div>
+                        <textarea id="incMetrics" rows="4" placeholder="Error rate, latency spikes, alert text…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:0.78rem;resize:vertical;"></textarea>
+                    </div>
+                    <div>
+                        <div class="form-label">Recent Commits / Deployments</div>
+                        <textarea id="incCommits" rows="3" placeholder="git log --oneline output…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-family:monospace;font-size:0.78rem;resize:vertical;"></textarea>
+                    </div>
+                    <div>
+                        <div class="form-label">Environment / Infrastructure</div>
+                        <textarea id="incEnv" rows="3" placeholder="Cloud provider, region, versions, config…" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:0.78rem;resize:vertical;"></textarea>
+                    </div>
+                </div>
+                <button class="btn btn-primary" style="margin-top:10px;width:100%;" onclick="runIncident()">🚨 Investigate Incident</button>
+                <div id="incResult" class="tool-result" style="display:none;"></div>
             </div>
         </div>
     </main>
@@ -2258,7 +2456,8 @@ print(my_list[5])`;
             const val = localStorage.getItem('bs_draft_' + id);
             if (el && val !== null) {
                 el.value = val;
-                el.dispatchEvent(new Event('change', { bubbles: true }));
+                // Only fire change on selects (visual state), not text inputs (avoids empty API calls)
+                if (el.tagName === 'SELECT') el.dispatchEvent(new Event('change', { bubbles: true }));
             }
         });
     }
@@ -2277,6 +2476,198 @@ print(my_list[5])`;
         restoreDrafts();
         initDraftListeners();
     };
+
+    // ── Engineering Tools ─────────────────────────────────────────────────────
+
+    function selectTool(name) {
+        document.querySelectorAll('.tool-chip').forEach(b => b.classList.toggle('active', b.dataset.tool === name));
+        document.querySelectorAll('.tool-panel').forEach(p => p.classList.toggle('active', p.id === 'tool-' + name));
+    }
+
+    function mdToHtml(text) {
+        return text
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+            .replace(/^## (.+)$/gm, '<h4 style="margin:14px 0 4px;color:var(--cyan);">$1</h4>')
+            .replace(/^### (.+)$/gm, '<h5 style="margin:10px 0 2px;">$1</h5>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\n/g, '<br>');
+    }
+
+    function toolResult(elId, html, elapsed) {
+        const el = document.getElementById(elId);
+        el.style.display = 'block';
+        el.innerHTML = html + `<div class="tool-timer">⏱ ${elapsed}s</div>`;
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function toolLoading(elId, msg = 'Analyzing…') {
+        const el = document.getElementById(elId);
+        el.style.display = 'block';
+        el.innerHTML = `<div style="color:var(--text-dim);font-size:0.85rem;">${msg}</div>`;
+    }
+
+    async function runTestGen() {
+        const code = document.getElementById('tgCode').value.trim();
+        const file = document.getElementById('tgFile').files[0];
+        const lang = document.getElementById('tgLang').value;
+        const framework = document.getElementById('tgFramework').value;
+        if (!code && !file) { alert('Paste code or select a file'); return; }
+        toolLoading('tgResult', 'Generating tests…');
+        try {
+            let data;
+            if (file) {
+                const fd = new FormData();
+                fd.append('file', file);
+                fd.append('language', lang);
+                fd.append('framework', framework);
+                const r = await fetch(`${API}/tools/test-gen`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+                data = await r.json();
+                if (!r.ok) throw new Error(data.detail || r.statusText);
+            } else {
+                const fd = new FormData();
+                fd.append('code', code);
+                fd.append('language', lang);
+                fd.append('framework', framework);
+                const r = await fetch(`${API}/tools/test-gen`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+                data = await r.json();
+                if (!r.ok) throw new Error(data.detail || r.statusText);
+            }
+            toolResult('tgResult', `<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:8px;">Framework: <strong>${escHtml(data.framework)}</strong> · Language: <strong>${escHtml(data.language)}</strong></div><pre>${escHtml(data.tests)}</pre>`, data.processing_time_seconds);
+        } catch(e) { toolResult('tgResult', `<div class="error-msg">⚠ ${escHtml(e.message)}</div>`, 0); }
+    }
+
+    async function runSecScan() {
+        const code = document.getElementById('ssCode').value.trim();
+        const file = document.getElementById('ssFile').files[0];
+        const lang = document.getElementById('ssLang').value;
+        if (!code && !file) { alert('Paste code or select a file'); return; }
+        toolLoading('ssResult', 'Scanning for vulnerabilities…');
+        try {
+            const fd = new FormData();
+            if (file) fd.append('file', file); else fd.append('code', code);
+            fd.append('language', lang);
+            const r = await fetch(`${API}/tools/security-scan`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.detail || r.statusText);
+            toolResult('ssResult', mdToHtml(data.scan), data.processing_time_seconds);
+        } catch(e) { toolResult('ssResult', `<div class="error-msg">⚠ ${escHtml(e.message)}</div>`, 0); }
+    }
+
+    async function runLogAnalyze() {
+        const file = document.getElementById('logFile').files[0];
+        if (!file) { alert('Select a log file'); return; }
+        toolLoading('logResult', 'Analyzing log file…');
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            const r = await fetch(`${API}/tools/log-analyze`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.detail || r.statusText);
+            toolResult('logResult', `<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:8px;">${escHtml(data.filename)} · ${data.lines.toLocaleString()} lines</div>` + mdToHtml(data.analysis), data.processing_time_seconds);
+        } catch(e) { toolResult('logResult', `<div class="error-msg">⚠ ${escHtml(e.message)}</div>`, 0); }
+    }
+
+    async function runRCA() {
+        const trace = document.getElementById('rcaTrace').value.trim();
+        if (!trace) { alert('Stack trace is required'); return; }
+        toolLoading('rcaResult', 'Correlating inputs and finding root cause…');
+        try {
+            const body = {
+                stack_trace: trace,
+                logs: document.getElementById('rcaLogs').value || null,
+                recent_commits: document.getElementById('rcaCommits').value || null,
+                environment: document.getElementById('rcaEnv').value || null,
+                dependencies: document.getElementById('rcaDeps').value || null,
+            };
+            const data = await api('/tools/root-cause', 'POST', body);
+            toolResult('rcaResult', mdToHtml(data.analysis), data.processing_time_seconds);
+        } catch(e) { toolResult('rcaResult', `<div class="error-msg">⚠ ${escHtml(e.message)}</div>`, 0); }
+    }
+
+    async function runPRRisk() {
+        const diff = document.getElementById('prDiff').value.trim();
+        if (!diff) { alert('Paste a git diff'); return; }
+        toolLoading('prResult', 'Scoring PR risk…');
+        try {
+            const body = {
+                diff,
+                pr_title: document.getElementById('prTitle').value || null,
+                pr_description: document.getElementById('prDesc').value || null,
+            };
+            const data = await api('/tools/pr-risk', 'POST', body);
+            const scoreHtml = data.risk_score !== null
+                ? `<div style="font-size:1.4rem;font-weight:700;color:${data.risk_score>=70?'var(--red)':data.risk_score>=40?'var(--yellow, #f0a)':'var(--green)'}">Risk Score: ${data.risk_score}/100</div>`
+                : '';
+            toolResult('prResult', scoreHtml + mdToHtml(data.analysis), data.processing_time_seconds);
+        } catch(e) { toolResult('prResult', `<div class="error-msg">⚠ ${escHtml(e.message)}</div>`, 0); }
+    }
+
+    async function runLegacy() {
+        const files = document.getElementById('legacyFiles').files;
+        if (!files.length) { alert('Select at least one file'); return; }
+        toolLoading('legacyResult', `Analyzing ${files.length} file(s)…`);
+        try {
+            const fd = new FormData();
+            for (const f of files) fd.append('files', f);
+            const r = await fetch(`${API}/tools/explain-legacy`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.detail || r.statusText);
+            toolResult('legacyResult', `<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:8px;">${data.files_analyzed} file(s) analyzed</div>` + mdToHtml(data.explanation), data.processing_time_seconds);
+        } catch(e) { toolResult('legacyResult', `<div class="error-msg">⚠ ${escHtml(e.message)}</div>`, 0); }
+    }
+
+    async function runRegression() {
+        const diff = document.getElementById('regDiff').value.trim();
+        if (!diff) { alert('Paste a git diff'); return; }
+        toolLoading('regResult', 'Predicting regressions…');
+        try {
+            const body = { diff, test_files: document.getElementById('regTests').value || null };
+            const data = await api('/tools/regression-detect', 'POST', body);
+            toolResult('regResult', mdToHtml(data.analysis), data.processing_time_seconds);
+        } catch(e) { toolResult('regResult', `<div class="error-msg">⚠ ${escHtml(e.message)}</div>`, 0); }
+    }
+
+    async function runArch() {
+        const repo = document.getElementById('archRepo').value.trim();
+        if (!repo) { alert('Enter a GitHub repo URL'); return; }
+        toolLoading('archResult', 'Fetching repo structure and analyzing…');
+        try {
+            const data = await api('/tools/architecture-review', 'POST', { repo_url: repo });
+            toolResult('archResult', `<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:8px;">${escHtml(data.repo)} · ${data.total_files} files · ${data.code_files} code files</div>` + mdToHtml(data.analysis), data.processing_time_seconds);
+        } catch(e) { toolResult('archResult', `<div class="error-msg">⚠ ${escHtml(e.message)}</div>`, 0); }
+    }
+
+    async function runSprint() {
+        const repo = document.getElementById('sprintRepo').value.trim();
+        const days = parseInt(document.getElementById('sprintDays').value);
+        if (!repo) { alert('Enter a GitHub repo URL'); return; }
+        toolLoading('sprintResult', `Fetching last ${days} days of activity…`);
+        try {
+            const data = await api('/tools/sprint-summary', 'POST', { repo_url: repo, days });
+            toolResult('sprintResult', `<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:8px;">${escHtml(data.repo)} · ${data.commits_found} commits · ${data.prs_found} PRs</div>` + mdToHtml(data.summary), data.processing_time_seconds);
+        } catch(e) { toolResult('sprintResult', `<div class="error-msg">⚠ ${escHtml(e.message)}</div>`, 0); }
+    }
+
+    async function runIncident() {
+        const fields = ['incDesc','incTrace','incLogs','incMetrics','incCommits','incEnv'];
+        if (fields.every(id => !document.getElementById(id).value.trim())) {
+            alert('Fill in at least one field'); return;
+        }
+        toolLoading('incResult', '🚨 Investigating incident — correlating all inputs…');
+        try {
+            const body = {
+                description:    document.getElementById('incDesc').value    || null,
+                stack_trace:    document.getElementById('incTrace').value   || null,
+                logs:           document.getElementById('incLogs').value    || null,
+                metrics:        document.getElementById('incMetrics').value || null,
+                recent_commits: document.getElementById('incCommits').value || null,
+                environment:    document.getElementById('incEnv').value     || null,
+            };
+            const data = await api('/tools/incident-investigate', 'POST', body);
+            toolResult('incResult', mdToHtml(data.analysis), data.processing_time_seconds);
+        } catch(e) { toolResult('incResult', `<div class="error-msg">⚠ ${escHtml(e.message)}</div>`, 0); }
+    }
 </script>
 </body>
 </html>

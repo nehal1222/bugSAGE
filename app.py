@@ -41,7 +41,8 @@ logger = logging.getLogger("debug_coach")
 
 ACCESS_TOKEN_EXPIRY_HOURS = 1
 REFRESH_TOKEN_EXPIRY_DAYS = 30
-DATA_DIR = Path(os.getenv("DATA_DIR", Path(__file__).parent))
+# Vercel's project filesystem is read-only; SQLite must live in /tmp there
+DATA_DIR = Path(os.getenv("DATA_DIR", "/tmp" if os.getenv("VERCEL") else str(Path(__file__).parent)))
 DB_PATH  = DATA_DIR / "bugsage.db"
 
 # ---------------------------------------------------------------------
@@ -1547,6 +1548,700 @@ async def finish_interview(request: InterviewFinishRequest,
     await _db.commit()
     return {"total_score": total, "total_possible": request.total_possible,
             "percentage": pct, "session_id": session_id}
+
+
+# =============================================================================
+# Engineering Tools
+# =============================================================================
+
+def _hist(user_id, rtype, lang, query, elapsed, score=0):
+    return (user_id, datetime.now().isoformat(), rtype, lang, "n/a", query[:100], elapsed, score)
+
+
+# ── Test Case Generator ───────────────────────────────────────────────────────
+@app.post("/tools/test-gen")
+async def generate_tests(
+    file: Optional[UploadFile] = File(None),
+    code: Optional[str] = Form(None),
+    language: str = Form(default="python"),
+    framework: str = Form(default="auto"),
+    current_user: str = Depends(get_current_user),
+):
+    if file:
+        raw = await file.read()
+        if len(raw) > 150_000:
+            raise HTTPException(400, "File too large (max 150 KB)")
+        source = raw.decode("utf-8", errors="replace")
+        ext = Path(file.filename or "").suffix.lower()
+        language = _EXT_LANG.get(ext, language)
+        label = file.filename or "file"
+    elif code:
+        source, label = code, "snippet"
+    else:
+        raise HTTPException(400, "Provide a file or code")
+
+    if not source.strip():
+        raise HTTPException(400, "Code is empty")
+
+    fw = framework if framework != "auto" else {
+        "python": "pytest", "javascript": "jest", "typescript": "jest",
+        "java": "JUnit 5", "go": "testing package", "rust": "#[test]",
+    }.get(language, "appropriate test framework")
+
+    prompt = f"""You are a senior engineer. Generate complete, runnable {fw} tests for this {language} code.
+Cover: happy paths, edge cases, boundary values, error/exception paths.
+Include all imports, descriptive names, and comments. Return ONLY the test code.
+
+```{language}
+{source[:12000]}
+```"""
+
+    t0 = time.time()
+    try:
+        result = await _call_gemini(prompt, GEMINI_MODELS[0], temperature=0.2, max_tokens=4096)
+    except Exception as exc:
+        raise HTTPException(502, f"AI error: {exc}")
+    elapsed = round(time.time() - t0, 2)
+    await _db.execute(
+        "INSERT INTO history (user_id,timestamp,request_type,language,level,query,processing_time,score) VALUES (?,?,?,?,?,?,?,?)",
+        _hist(current_user, "test_gen", language, label, elapsed)
+    )
+    await _db.commit()
+    return {"language": language, "framework": fw, "tests": result, "processing_time_seconds": elapsed}
+
+
+# ── Security Scanner ──────────────────────────────────────────────────────────
+@app.post("/tools/security-scan")
+async def security_scan(
+    file: Optional[UploadFile] = File(None),
+    code: Optional[str] = Form(None),
+    language: str = Form(default="auto"),
+    current_user: str = Depends(get_current_user),
+):
+    if file:
+        raw = await file.read()
+        if len(raw) > 150_000:
+            raise HTTPException(400, "File too large")
+        source = raw.decode("utf-8", errors="replace")
+        ext = Path(file.filename or "").suffix.lower()
+        language = _EXT_LANG.get(ext, language)
+        label = file.filename or "file"
+    elif code:
+        source, label = code, "snippet"
+    else:
+        raise HTTPException(400, "Provide a file or code")
+
+    prompt = f"""You are an application security engineer performing a deep security audit of {language} code.
+
+Scan for each category below. For every issue: state approximate line number, severity (Critical/High/Medium/Low), and a one-line fix.
+If a category is clean write: ✅ None found.
+
+## SQL Injection
+## XSS (Cross-Site Scripting)
+## Hardcoded Secrets & Keys
+## Insecure Deserialization (eval, pickle, unsafe YAML)
+## Broken Auth & Authorization
+## Path Traversal & Unsafe File Ops
+## Missing Input Validation
+## Dangerous Third-Party Usage
+
+## Security Score
+X/10 with one-sentence justification.
+
+## Top 3 Priority Fixes
+Numbered, most critical first.
+
+```{language}
+{source[:15000]}
+```"""
+
+    t0 = time.time()
+    try:
+        result = await _call_gemini(prompt, GEMINI_MODELS[0], temperature=0.1, max_tokens=4096)
+    except Exception as exc:
+        raise HTTPException(502, f"AI error: {exc}")
+    elapsed = round(time.time() - t0, 2)
+    await _db.execute(
+        "INSERT INTO history (user_id,timestamp,request_type,language,level,query,processing_time,score) VALUES (?,?,?,?,?,?,?,?)",
+        _hist(current_user, "security_scan", language, label, elapsed)
+    )
+    await _db.commit()
+    return {"language": language, "scan": result, "processing_time_seconds": elapsed}
+
+
+# ── Log Analyzer ──────────────────────────────────────────────────────────────
+@app.post("/tools/log-analyze")
+async def analyze_logs(
+    file: UploadFile = File(...),
+    current_user: str = Depends(get_current_user),
+):
+    raw = await file.read()
+    content = raw[:500_000].decode("utf-8", errors="replace")
+    if not content.strip():
+        raise HTTPException(400, "Log file is empty")
+
+    lines = content.count("\n") + 1
+    prompt = f"""You are an SRE analyzing a log file ({lines} lines from {file.filename}).
+
+## Log Type & Time Range
+What system/service? What time period does this cover?
+
+## Anomalies Detected
+Every anomaly or error spike with timestamps. Be specific.
+
+## Repeating Failures
+Errors that repeat — count, frequency, pattern.
+
+## Critical Event Timeline
+Chronological list of the most important events.
+
+## Root Cause Hypothesis
+Most likely cause of any issues seen.
+
+## Recommendations
+Numbered action items to fix or investigate.
+
+## Health Score
+X/10 with brief justification.
+
+Log:
+{content[:40000]}{"...[truncated]" if len(content) > 40000 else ""}"""
+
+    t0 = time.time()
+    try:
+        result = await _call_gemini(prompt, GEMINI_MODELS[0], temperature=0.2, max_tokens=4096)
+    except Exception as exc:
+        raise HTTPException(502, f"AI error: {exc}")
+    elapsed = round(time.time() - t0, 2)
+    await _db.execute(
+        "INSERT INTO history (user_id,timestamp,request_type,language,level,query,processing_time,score) VALUES (?,?,?,?,?,?,?,?)",
+        _hist(current_user, "log_analyze", "logs", file.filename or "log", elapsed)
+    )
+    await _db.commit()
+    return {"filename": file.filename, "lines": lines, "analysis": result,
+            "processing_time_seconds": elapsed}
+
+
+# ── Root Cause Analysis ───────────────────────────────────────────────────────
+class RCARequest(BaseModel):
+    stack_trace: str
+    logs: Optional[str] = None
+    environment: Optional[str] = None
+    recent_commits: Optional[str] = None
+    dependencies: Optional[str] = None
+    description: Optional[str] = None
+
+
+@app.post("/tools/root-cause")
+async def root_cause_analysis(request: RCARequest, current_user: str = Depends(get_current_user)):
+    if not request.stack_trace.strip():
+        raise HTTPException(400, "Stack trace is required")
+
+    parts = [f"## Stack Trace\n{request.stack_trace}"]
+    if request.logs:
+        parts.append(f"## Logs\n{request.logs[:5000]}")
+    if request.environment:
+        parts.append(f"## Environment\n{request.environment[:2000]}")
+    if request.recent_commits:
+        parts.append(f"## Recent Commits\n{request.recent_commits[:3000]}")
+    if request.dependencies:
+        parts.append(f"## Dependencies\n{request.dependencies[:2000]}")
+    if request.description:
+        parts.append(f"## Description\n{request.description}")
+
+    prompt = f"""You are a senior SRE performing root cause analysis of a production incident.
+Correlate ALL provided data and respond with:
+
+## Root Cause
+The single most likely root cause. Be direct and specific.
+
+## Confidence
+High / Medium / Low — one sentence why.
+
+## Evidence Chain
+Numbered propagation timeline: trigger → effect → cascade...
+
+## Contributing Factors
+What made the failure worse or more likely.
+
+## Immediate Fix
+Exact steps to stop the bleeding right now.
+
+## Long-term Fix
+Architectural or process change to prevent recurrence.
+
+---
+{chr(10).join(parts)}"""
+
+    t0 = time.time()
+    try:
+        result = await _call_gemini(prompt, GEMINI_MODELS[0], temperature=0.2, max_tokens=4096)
+    except Exception as exc:
+        raise HTTPException(502, f"AI error: {exc}")
+    elapsed = round(time.time() - t0, 2)
+    await _db.execute(
+        "INSERT INTO history (user_id,timestamp,request_type,language,level,query,processing_time,score) VALUES (?,?,?,?,?,?,?,?)",
+        _hist(current_user, "root_cause", "infra", request.stack_trace, elapsed)
+    )
+    await _db.commit()
+    return {"analysis": result, "processing_time_seconds": elapsed}
+
+
+# ── PR Risk Score ─────────────────────────────────────────────────────────────
+class PRRiskRequest(BaseModel):
+    diff: str
+    pr_title: Optional[str] = None
+    pr_description: Optional[str] = None
+    model: str = "gemini-2.5-flash"
+
+
+@app.post("/tools/pr-risk")
+async def pr_risk_score(request: PRRiskRequest, current_user: str = Depends(get_current_user)):
+    diff = request.diff.strip()
+    if not diff:
+        raise HTTPException(400, "Diff is required")
+    if len(diff) > 200_000:
+        raise HTTPException(400, "Diff too large (max 200 KB)")
+
+    meta = _parse_diff_meta(diff)
+    ctx = ""
+    if request.pr_title:
+        ctx += f"PR Title: {request.pr_title}\n"
+    if request.pr_description:
+        ctx += f"PR Description: {request.pr_description[:800]}\n"
+
+    prompt = f"""You are an engineering lead scoring a pull request for risk before merging.
+{ctx}Files: {len(meta['files'])} | +{meta['added']} added | -{meta['removed']} removed
+
+Score each dimension 0–100 (higher = riskier):
+
+## Security Risk: X/100
+[evidence]
+
+## Performance Risk: X/100
+[evidence]
+
+## Breaking Changes Risk: X/100
+[API/schema/interface changes]
+
+## Maintainability Risk: X/100
+[complexity, readability]
+
+## Overall Risk Score: X/100
+[weighted justification]
+
+## Risk Level
+🟢 LOW RISK · 🟡 MODERATE RISK · 🔴 HIGH RISK · 🚨 CRITICAL RISK
+
+## Merge Recommendation
+APPROVE / APPROVE WITH CHANGES / REQUEST CHANGES / BLOCK
+
+## Top 3 Concerns
+Numbered, most critical first.
+
+## Suggested Safeguards
+Tests, monitoring, feature flags to add before merging.
+
+---
+{diff[:15000]}{"...[truncated]" if len(diff) > 15000 else ""}"""
+
+    t0 = time.time()
+    try:
+        result = await _call_gemini(prompt, request.model, temperature=0.2, max_tokens=4096)
+    except Exception as exc:
+        raise HTTPException(502, f"AI error: {exc}")
+
+    sm = re.search(r"Overall Risk Score:\s*(\d+)/100", result)
+    risk_score = int(sm.group(1)) if sm else None
+    elapsed = round(time.time() - t0, 2)
+    await _db.execute(
+        "INSERT INTO history (user_id,timestamp,request_type,language,level,query,processing_time,score) VALUES (?,?,?,?,?,?,?,?)",
+        _hist(current_user, "pr_risk", "diff", f"{len(meta['files'])} files", elapsed, risk_score or 0)
+    )
+    await _db.commit()
+    return {"files_changed": len(meta["files"]), "risk_score": risk_score,
+            "analysis": result, "processing_time_seconds": elapsed}
+
+
+# ── Explain Legacy Code ───────────────────────────────────────────────────────
+@app.post("/tools/explain-legacy")
+async def explain_legacy(
+    files: List[UploadFile] = File(...),
+    current_user: str = Depends(get_current_user),
+):
+    if len(files) > 10:
+        raise HTTPException(400, "Max 10 files at once")
+
+    combined, total = [], 0
+    for f in files:
+        raw = await f.read()
+        total += len(raw)
+        if total > 300_000:
+            break
+        src = raw.decode("utf-8", errors="replace")
+        ext = Path(f.filename or "").suffix.lower()
+        lang = _EXT_LANG.get(ext, "code")
+        combined.append(f"### {f.filename} ({lang})\n```{lang}\n{src[:15000]}\n```")
+
+    if not combined:
+        raise HTTPException(400, "No readable files provided")
+
+    prompt = f"""You are a senior engineer onboarding onto a legacy codebase. Explain these files for a new team member:
+
+## Architecture Overview
+What is this system? What does it do? How are the pieces connected?
+
+## Component Breakdown
+Each file: purpose, what it exports, what it depends on.
+
+## Data Flow
+Entry points → processing → outputs.
+
+## Key Patterns & Algorithms
+Design patterns used. Non-obvious algorithmic choices.
+
+## Technical Debt & Risks
+What looks fragile or outdated? What would you refactor first?
+
+## Onboarding Recommendations
+Top 3 things a new developer must understand before touching this code.
+
+---
+{chr(10).join(combined)}"""
+
+    t0 = time.time()
+    try:
+        result = await _call_gemini(prompt, GEMINI_MODELS[0], temperature=0.3, max_tokens=4096)
+    except Exception as exc:
+        raise HTTPException(502, f"AI error: {exc}")
+    elapsed = round(time.time() - t0, 2)
+    await _db.execute(
+        "INSERT INTO history (user_id,timestamp,request_type,language,level,query,processing_time,score) VALUES (?,?,?,?,?,?,?,?)",
+        _hist(current_user, "legacy_explain", "mixed", f"{len(combined)} files", elapsed)
+    )
+    await _db.commit()
+    return {"files_analyzed": len(combined), "explanation": result,
+            "processing_time_seconds": elapsed}
+
+
+# ── Regression Detector ───────────────────────────────────────────────────────
+class RegressionRequest(BaseModel):
+    diff: str
+    test_files: Optional[str] = None
+    model: str = "gemini-2.5-flash"
+
+
+@app.post("/tools/regression-detect")
+async def detect_regression(request: RegressionRequest, current_user: str = Depends(get_current_user)):
+    diff = request.diff.strip()
+    if not diff:
+        raise HTTPException(400, "Diff is required")
+    if len(diff) > 200_000:
+        raise HTTPException(400, "Diff too large")
+
+    meta = _parse_diff_meta(diff)
+    test_ctx = f"\n\nExisting Tests:\n{request.test_files[:4000]}" if request.test_files else ""
+
+    prompt = f"""You are a senior QA engineer. Analyze this diff and predict regressions BEFORE deployment.
+Files: {', '.join(meta['files'][:8]) or 'unknown'} | +{meta['added']} / -{meta['removed']}
+
+## High Risk Regressions
+Functionality LIKELY to break. Each: what breaks, why, severity (Critical/High/Medium).
+
+## Medium Risk Regressions
+Might break depending on edge cases.
+
+## Modules at Risk
+Other parts of the codebase (not in diff) that could be affected.
+
+## Suggested Test Cases
+Specific scenarios to run before deploying: input → expected output.
+
+## Deployment Checklist
+Ordered steps to verify before and after deploying.
+
+## Rollback Trigger
+Exact signals (error rate, log pattern, metric threshold) that should trigger rollback.
+
+---
+{diff[:15000]}{test_ctx}"""
+
+    t0 = time.time()
+    try:
+        result = await _call_gemini(prompt, request.model, temperature=0.2, max_tokens=4096)
+    except Exception as exc:
+        raise HTTPException(502, f"AI error: {exc}")
+    elapsed = round(time.time() - t0, 2)
+    await _db.execute(
+        "INSERT INTO history (user_id,timestamp,request_type,language,level,query,processing_time,score) VALUES (?,?,?,?,?,?,?,?)",
+        _hist(current_user, "regression_detect", "diff", f"{len(meta['files'])} files", elapsed)
+    )
+    await _db.commit()
+    return {"files_changed": meta["files"], "analysis": result,
+            "processing_time_seconds": elapsed}
+
+
+# ── Architecture Review ───────────────────────────────────────────────────────
+class ArchReviewRequest(BaseModel):
+    repo_url: str
+    model: str = "gemini-2.5-flash"
+
+
+@app.post("/tools/architecture-review")
+async def architecture_review(request: ArchReviewRequest, current_user: str = Depends(get_current_user)):
+    mm = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git|/|$)", request.repo_url.strip())
+    if not mm:
+        raise HTTPException(400, "Invalid GitHub repo URL (https://github.com/owner/repo)")
+    owner, repo = mm.group(1), mm.group(2)
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1",
+                headers={"User-Agent": "bugSAGE/1.0"}
+            )
+        if resp.status_code == 404:
+            raise HTTPException(404, "Repo not found or private")
+        resp.raise_for_status()
+        tree = resp.json().get("tree", [])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"GitHub API error: {exc}")
+
+    all_files = [f.get("path", "") for f in tree if f.get("type") == "blob"]
+    code_files = [p for p in all_files if Path(p).suffix.lower() in _EXT_LANG]
+
+    dirs: Dict[str, int] = {}
+    for path in all_files:
+        top = path.split("/")[0] if "/" in path else "root"
+        dirs[top] = dirs.get(top, 0) + 1
+
+    dir_lines = "\n".join(f"  {d}/  ({n} files)"
+                          for d, n in sorted(dirs.items(), key=lambda x: -x[1])[:20])
+
+    prompt = f"""You are a principal engineer reviewing the architecture of {owner}/{repo}.
+
+Total files: {len(all_files)} | Code files: {len(code_files)}
+
+Top-level directories:
+{dir_lines}
+
+Code files (sample):
+{chr(10).join(code_files[:120])}
+
+## Architecture Overview
+System type, stack, framework.
+
+## Directory Structure Analysis
+Purpose of each major directory. Is organisation clean?
+
+## Potential Issues
+Large/sprawling directories, missing tests or CI, poor separation of concerns.
+
+## Inferred Dependency Graph
+How components likely depend on each other.
+
+## Circular Import Risks
+Which modules look likely to have circular dependencies.
+
+## Complexity Hotspots
+Areas that look most complex or risky.
+
+## Top 5 Recommendations
+Ranked by impact."""
+
+    t0 = time.time()
+    try:
+        result = await _call_gemini(prompt, request.model, temperature=0.3, max_tokens=4096)
+    except Exception as exc:
+        raise HTTPException(502, f"AI error: {exc}")
+    elapsed = round(time.time() - t0, 2)
+    await _db.execute(
+        "INSERT INTO history (user_id,timestamp,request_type,language,level,query,processing_time,score) VALUES (?,?,?,?,?,?,?,?)",
+        _hist(current_user, "arch_review", "repo", f"{owner}/{repo}", elapsed)
+    )
+    await _db.commit()
+    return {"repo": f"{owner}/{repo}", "total_files": len(all_files),
+            "code_files": len(code_files), "analysis": result,
+            "processing_time_seconds": elapsed}
+
+
+# ── Sprint Assistant ──────────────────────────────────────────────────────────
+class SprintRequest(BaseModel):
+    repo_url: str
+    days: int = 7
+    model: str = "gemini-2.5-flash"
+
+
+@app.post("/tools/sprint-summary")
+async def sprint_summary(request: SprintRequest, current_user: str = Depends(get_current_user)):
+    mm = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git|/|$)", request.repo_url.strip())
+    if not mm:
+        raise HTTPException(400, "Invalid GitHub repo URL")
+    owner, repo = mm.group(1), mm.group(2)
+
+    days = max(1, min(request.days, 30))
+    since = (datetime.now() - timedelta(days=days)).isoformat() + "Z"
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            cr = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/commits?since={since}&per_page=50",
+                headers={"User-Agent": "bugSAGE/1.0"}
+            )
+            pr_r = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls?state=all&per_page=30&sort=updated",
+                headers={"User-Agent": "bugSAGE/1.0"}
+            )
+        if cr.status_code == 404:
+            raise HTTPException(404, "Repo not found or private")
+        commits = cr.json() if cr.status_code == 200 else []
+        prs = pr_r.json() if pr_r.status_code == 200 else []
+        if isinstance(commits, dict):
+            commits = []
+        if isinstance(prs, dict):
+            prs = []
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"GitHub API error: {exc}")
+
+    commit_lines = []
+    for c in commits[:30]:
+        msg = c.get("commit", {}).get("message", "").split("\n")[0][:100]
+        author = c.get("commit", {}).get("author", {}).get("name", "?")
+        date = (c.get("commit", {}).get("author", {}).get("date", "") or "")[:10]
+        commit_lines.append(f"  [{date}] {author}: {msg}")
+
+    pr_lines = []
+    for pr in prs[:20]:
+        merged = "merged" if pr.get("merged_at") else pr.get("state", "")
+        title = pr.get("title", "")[:80]
+        user = pr.get("user", {}).get("login", "?")
+        pr_lines.append(f"  [{merged.upper()}] #{pr.get('number')} {title} (@{user})")
+
+    data = (f"Repository: {owner}/{repo}\nPeriod: last {days} days\n\n"
+            f"Commits ({len(commits)}):\n" + ("\n".join(commit_lines) or "  none") +
+            f"\n\nPull Requests:\n" + ("\n".join(pr_lines) or "  none"))
+
+    prompt = f"""You are an engineering manager summarising a sprint for the team.
+
+## What Was Shipped
+Key features, fixes, and improvements delivered.
+
+## In Progress
+Open PRs that appear to be works in progress.
+
+## Blockers & Risks
+PRs open too long, stalled work, concerning patterns.
+
+## Team Activity
+Who contributed what? Notable contributions.
+
+## Technical Debt Signals
+Commit messages suggesting shortcuts or known issues.
+
+## Recommended Focus for Next Sprint
+Based on what's in progress and blocked.
+
+---
+{data}"""
+
+    t0 = time.time()
+    try:
+        result = await _call_gemini(prompt, request.model, temperature=0.4, max_tokens=3000)
+    except Exception as exc:
+        raise HTTPException(502, f"AI error: {exc}")
+    elapsed = round(time.time() - t0, 2)
+    await _db.execute(
+        "INSERT INTO history (user_id,timestamp,request_type,language,level,query,processing_time,score) VALUES (?,?,?,?,?,?,?,?)",
+        _hist(current_user, "sprint_summary", "github", f"{owner}/{repo}", elapsed)
+    )
+    await _db.commit()
+    return {"repo": f"{owner}/{repo}", "period_days": days,
+            "commits_found": len(commits), "prs_found": len(prs),
+            "summary": result, "processing_time_seconds": elapsed}
+
+
+# ── AI Incident Investigator ──────────────────────────────────────────────────
+class IncidentRequest(BaseModel):
+    description: Optional[str] = None
+    stack_trace: Optional[str] = None
+    logs: Optional[str] = None
+    metrics: Optional[str] = None
+    recent_commits: Optional[str] = None
+    environment: Optional[str] = None
+    model: str = "gemini-2.5-flash"
+
+
+@app.post("/tools/incident-investigate")
+async def investigate_incident(request: IncidentRequest, current_user: str = Depends(get_current_user)):
+    if not any([request.description, request.stack_trace, request.logs,
+                request.metrics, request.recent_commits, request.environment]):
+        raise HTTPException(400, "Provide at least one input")
+
+    parts = []
+    if request.description:
+        parts.append(f"## Incident Description\n{request.description}")
+    if request.stack_trace:
+        parts.append(f"## Stack Trace\n{request.stack_trace[:5000]}")
+    if request.logs:
+        parts.append(f"## Logs\n{request.logs[:8000]}")
+    if request.metrics:
+        parts.append(f"## Metrics / Alerts\n{request.metrics[:3000]}")
+    if request.recent_commits:
+        parts.append(f"## Recent Commits\n{request.recent_commits[:3000]}")
+    if request.environment:
+        parts.append(f"## Environment\n{request.environment[:2000]}")
+
+    prompt = f"""You are a senior SRE and incident commander. Correlate ALL provided data and produce a complete incident report:
+
+## Incident Summary
+What happened, when, impact (one paragraph).
+
+## Root Cause
+Definitive root cause with evidence. Confidence: High/Medium/Low.
+
+## Evidence Chain
+Numbered timeline: 1. trigger → 2. effect → 3. cascade...
+
+## Blast Radius
+Systems, users, and data affected.
+
+## Immediate Remediation
+Priority-ordered steps to resolve right now.
+
+## Prevention Plan
+Code changes, architecture improvements, or process changes to prevent recurrence.
+
+## Monitoring Gaps
+Alerting that would have caught this earlier.
+
+## Jira Ticket
+Title: [one line]
+Priority: [Critical/High/Medium/Low]
+Description: [2-3 sentences]
+
+## Slack Update
+3-4 sentence incident update for #incidents channel.
+
+---
+{chr(10).join(parts)}"""
+
+    t0 = time.time()
+    try:
+        result = await _call_gemini(prompt, request.model, temperature=0.2, max_tokens=5000)
+    except Exception as exc:
+        raise HTTPException(502, f"AI error: {exc}")
+    elapsed = round(time.time() - t0, 2)
+    label = (request.description or request.stack_trace or "incident")
+    await _db.execute(
+        "INSERT INTO history (user_id,timestamp,request_type,language,level,query,processing_time,score) VALUES (?,?,?,?,?,?,?,?)",
+        _hist(current_user, "incident_investigate", "infra", label, elapsed)
+    )
+    await _db.commit()
+    return {"analysis": result, "processing_time_seconds": elapsed}
 
 
 # ---------------------------------------------------------------------
