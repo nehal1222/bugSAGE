@@ -100,7 +100,10 @@ app.add_middleware(
 @app.exception_handler(Exception)
 async def _unhandled(request: Request, exc: Exception):
     logger.error("Unhandled %s: %s", type(exc).__name__, exc, exc_info=True)
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+    try:
+        return JSONResponse(status_code=500, content={"detail": str(exc)})
+    except Exception:
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 @app.get("/health")

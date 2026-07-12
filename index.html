@@ -1422,12 +1422,19 @@
         return String(detail);
     }
 
+    // Safe JSON parse — never throws; returns {} on empty / non-JSON body
+    async function safeJson(r) {
+        try { return await r.json(); } catch { return {}; }
+    }
+
     // No-auth API call (for login/register)
     async function apiNoAuth(path, method = 'GET', body = null) {
         const opts = { method, headers: { 'Content-Type': 'application/json' } };
         if (body) opts.body = JSON.stringify(body);
-        const r = await fetch(API + path, opts);
-        const data = await r.json();
+        let r;
+        try { r = await fetch(API + path, opts); }
+        catch (e) { throw new Error('Cannot reach server — check your connection'); }
+        const data = await safeJson(r);
         if (!r.ok) throw new Error(parseDetail(data.detail, r.status));
         return data;
     }
@@ -1440,7 +1447,9 @@
             if (body) o.body = JSON.stringify(body);
             return o;
         };
-        let r = await fetch(API + path, makeOpts(token));
+        let r;
+        try { r = await fetch(API + path, makeOpts(token)); }
+        catch (e) { throw new Error('Cannot reach server — check your connection'); }
         if (r.status === 401 && refreshToken) {
             try {
                 const ref = await fetch(API + '/auth/refresh', {
@@ -1449,7 +1458,7 @@
                     body: JSON.stringify({ refresh_token: refreshToken })
                 });
                 if (ref.ok) {
-                    const rd = await ref.json();
+                    const rd = await safeJson(ref);
                     token = rd.token; tokenExpiresAt = rd.expires_at;
                     localStorage.setItem('token', token);
                     localStorage.setItem('tokenExpiresAt', tokenExpiresAt);
@@ -1473,7 +1482,7 @@
             checkAuth();
             throw new Error('Session expired. Please log in again.');
         }
-        const data = await r.json();
+        const data = await safeJson(r);
         if (!r.ok) throw new Error(parseDetail(data.detail, r.status));
         return data;
     }
