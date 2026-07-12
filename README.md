@@ -1,90 +1,114 @@
-# bugSAGE
-https://delicate-churros-03adcc.netlify.app/
-An **AI-powered Debugging Coach** that helps developers understand, fix, and learn from coding errors. This tool guides you step-by-step in identifying bugs, suggesting fixes, and improving your debugging skills—like having a personal coding mentor.
+# bugSAGE — AI Debugging Coach
+
+**Live:** https://bugsage.onrender.com/app &nbsp;|&nbsp; **GitHub:** https://github.com/nehal1222/bugSAGE
+
+> An AI-powered platform that helps developers debug faster, practice skills, review code, and run engineering workflows — all powered by Google Gemini.
 
 ---
 
-## 🚀 Features
+## Resume Description
 
-* 🪲 **Bug Detection** – Automatically analyzes errors in your code.
-* 📖 **Step-by-Step Guidance** – Explains the problem in simple terms.
-* 🤖 **AI-Powered Suggestions** – Provides intelligent solutions and fixes.
-* 🎓 **Learning Mode** – Acts like a mentor to help you **understand debugging**, not just fix errors.
-* 🌐 **FastAPI Backend** – Built with FastAPI for speed and scalability.
-* 🖥️ **Interactive UI** *(optional)* – Can be extended into a web app or CLI tool.
+**bugSAGE — AI Debugging & Engineering Coach** | [bugsage.onrender.com/app](https://bugsage.onrender.com/app)
+
+Built a full-stack AI debugging platform using **FastAPI**, **Google Gemini 2.0**, and **PostgreSQL (Supabase)**. Features include AI error analysis, practice question generation, GitHub code review, PR risk scoring, and 10 engineering productivity tools (test generation, security scanning, log analysis, incident investigation, and more). Implemented JWT authentication with Google OAuth, a dual-backend database layer (SQLite/PostgreSQL), Gemini rate-limit retry with exponential backoff, and a responsive single-page frontend. Deployed on Render via Docker with automated CI from GitHub.
 
 ---
 
-## 📂 Project Structure
+## Features
 
-```bash
-debugging-coach/
-│── app/
-│   ├── main.py          # FastAPI entry point
-│   ├── routes.py        # API routes for debugging help
-│   ├── utils.py         # Helper functions for error parsing & suggestions
-│   └── models.py        # Data models for requests/responses
-│
-│── requirements.txt     # Dependencies
-│── README.md            # Project documentation
-│── LICENSE              # Open-source license
-```
+### Debug
+- AI error analysis with language + skill level selection
+- Step-by-step explanations powered by Gemini 2.0 Flash
+- Rate-limit retry with exponential backoff
+
+### Practice
+- Generate coding questions across Python, JavaScript, Go, Rust, Java, and more
+- Modes: MCQ, coding challenges, debugging exercises
+- Configurable difficulty and question count
+
+### Code Review
+- GitHub repo review — paste a URL for AI architecture analysis
+- Diff / PR review — paste a raw diff for risk scoring and change summary
+
+### ⚙ Engineering Tools (10 tools)
+| Tool | What it does |
+|------|-------------|
+| Test Generator | Writes unit tests for pasted code |
+| Security Scanner | Finds vulnerabilities and CVEs |
+| Log Analyzer | Spots errors and anomalies in log files |
+| Root Cause Analysis | Diagnoses bugs from symptoms |
+| PR Risk Score | Rates the risk level of a pull request |
+| Explain Legacy Code | Translates old/unfamiliar code into plain English |
+| Regression Detector | Identifies risky code changes |
+| Architecture Review | Reviews system design from a description |
+| Sprint Assistant | Turns sprint tickets into an actionable plan |
+| AI Incident Investigator | Diagnoses production incidents |
+
+### Dashboard
+- Session stats: queries, score, accuracy, streak
+- Activity history and leaderboard
+
+### Auth
+- Username/password register + login (PBKDF2-HMAC-SHA256)
+- Google OAuth sign-in
+- JWT access tokens (1 hr) + refresh tokens (30 days)
+- Draft persistence across page refreshes via localStorage
 
 ---
 
-## ⚡ Installation
+## Tech Stack
 
-1. **Clone the repository**
+| Layer | Technology |
+|-------|-----------|
+| Backend | FastAPI + Uvicorn (Python 3.12) |
+| AI | Google Gemini 2.0 Flash |
+| Database | PostgreSQL via Supabase (prod) / SQLite (local dev) |
+| Auth | PBKDF2 passwords + Google OAuth 2.0 + JWT |
+| Frontend | Vanilla JS + CSS (single-page, no framework) |
+| Deployment | Render (Docker) + GitHub Actions CI |
 
-```bash
-git clone https://github.com/yourusername/debugging-coach.git
-cd debugging-coach
-```
+---
 
-2. **Create and activate a virtual environment**
-
-```bash
-python -m venv venv
-source venv/bin/activate  # On Linux/Mac
-venv\Scripts\activate     # On Windows
-```
-
-3. **Install dependencies**
+## Local Development
 
 ```bash
+git clone https://github.com/nehal1222/bugSAGE.git
+cd bugSAGE
+
 pip install -r requirements.txt
+
+# Create .env with your keys (see below)
+uvicorn app:app --reload
+
+# Open http://localhost:8000/app
 ```
 
-4. **Run the FastAPI server**
+### .env
 
-```bash
-uvicorn app.main:app --reload
+```env
+GEMINI_API_KEY=your_gemini_api_key
+GOOGLE_CLIENT_ID=your_google_client_id
+# DATABASE_URL=postgresql://...   # leave unset to use SQLite locally
 ```
 
 ---
 
-## 🎯 Usage
+## Project Structure
 
-* Go to: **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)**
-* Use the **Swagger UI** to test debugging endpoints.
-* Input your code snippet or error message → get back **suggestions, fixes, and explanations**.
-
-## 🛠️ Tech Stack
-
-* **Python 3.9+**
-* **FastAPI** – API framework
-* **Uvicorn** – ASGI server
-* **Pydantic** – Data validation
-* **OpenAI/ML Models** *(if integrated for smart debugging)*
+```
+bugSAGE/
+├── app.py            # FastAPI app + all API endpoints
+├── db.py             # DB abstraction layer (SQLite / PostgreSQL)
+├── index.html        # Frontend single-page app
+├── requirements.txt
+├── Dockerfile
+└── docker-compose.yml
+```
 
 ---
 
-## 📌 Roadmap
+## Deployment
 
-* [ ] Add support for multiple programming languages.
-* [ ] Provide CLI tool for offline debugging help.
-* [ ] Integrate with VS Code / JetBrains as an extension.
-* [ ] Add advanced AI models for smarter bug explanations.
+Hosted on **Render** (Docker, free tier) with **Supabase PostgreSQL**.
 
-
-Do you want me to make this **README** sound more like a **professional startup product pitch** (sleek & branding-heavy) or more like a **GitHub student project** (simple & easy to follow)?
+> Free tier note: the service sleeps after 15 min of inactivity — first request after sleep takes ~30 s to wake up.
